@@ -1,0 +1,52 @@
+name: Instagram 自動投稿
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # 30分ごとに確認（GitHubの混雑で数分〜十数分遅れることがあります）
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "post=投稿 / dry-run=確認だけ / check=トークン確認"
+        type: choice
+        default: dry-run
+        options: [post, dry-run, check]
+
+permissions:
+  contents: write   # 投稿記録 posted.json を保存するため
+
+concurrency:
+  group: instagram-post   # 同時に2つ動いて二重投稿しないように
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 投稿
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          MODE: ${{ inputs.mode || 'post' }}
+        run: |
+          case "$MODE" in
+            dry-run) python post.py --dry-run ;;
+            check)   python post.py --check ;;
+            *)       python post.py ;;
+          esac
+
+      - name: 投稿記録を保存
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add posted.json 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "投稿記録を更新"
+          git pull --rebase
+          git push

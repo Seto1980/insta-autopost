@@ -1,0 +1,48 @@
+name: トークン自動延長
+
+on:
+  schedule:
+    - cron: "0 0 1,15 * *"   # 毎月1日と15日（日本時間 9:00）
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 動いている印を残して、定期実行が止まらないようにするため
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: トークンを延長
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: python refresh_token.py
+
+      - name: Secret を新しいトークンで上書き
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GH_PAT が未設定のため、Secret を上書きできません（README の手順5を参照）"
+            rm -f new_token.txt
+            exit 1
+          fi
+          gh secret set IG_ACCESS_TOKEN --repo "$GITHUB_REPOSITORY" < new_token.txt
+          rm -f new_token.txt
+
+      # GitHub は60日間動きのないリポジトリの定期実行を止めるので、記録を残しておく
+      - name: 動作記録を残す
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .last-refresh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .last-refresh
+          git commit -m "トークン延長の記録" || exit 0
+          git pull --rebase
+          git push
